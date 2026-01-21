@@ -11,14 +11,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS: CORRECCIÓN DE COLORES EN MÓVIL Y SIDEBAR ---
+# --- CSS: AJUSTES DE VISIBILIDAD Y BOTÓN SIDEBAR ---
 def local_css():
     st.markdown("""
 <style>
     /* Fondo General Negro */
     .stApp { background-color: #000000; color: #FFFFFF; }
     
-    /* FIX SIDEBAR: Forzar color oscuro y letras blancas en móvil */
+    /* FIX SIDEBAR: Fondo oscuro y letras blancas */
     section[data-testid="stSidebar"] {
         background-color: #121212 !important;
     }
@@ -26,10 +26,13 @@ def local_css():
         color: #FFFFFF !important;
     }
     
-    /* Botón de flecha para desplegar sidebar en móvil */
+    /* BOTÓN DE LA FLECHITA (Sidebar Toggle) */
+    /* Lo hacemos visible resaltándolo con un color de fondo cuando la barra está cerrada */
     button[kind="header"] {
-        color: #FFFFFF !important;
-        background-color: transparent !important;
+        background-color: rgba(255, 75, 43, 0.2) !important; /* Un toque del rojo MtyPass muy suave */
+        color: #FF4B2B !important; /* Flecha color rojo brillante para que resalte */
+        border-radius: 0 10px 10px 0 !important;
+        margin-left: 5px !important;
     }
 
     /* Inputs y Selectores: Letras Blancas */
@@ -76,7 +79,7 @@ def local_css():
         object-fit: cover;
     }
 
-    /* BOTÓN WHATSAPP: Verde con letras blancas */
+    /* BOTÓN WHATSAPP */
     .wa-link {
         display: block;
         background-color: #25D366 !important;
@@ -147,7 +150,6 @@ def guardar_boleto(evento, recinto, precio, zona, whatsapp, img_url, categoria):
 def main():
     st.markdown("<h1 style='text-align:center;'>MtyPass</h1>", unsafe_allow_html=True)
 
-    # BARRA LATERAL (SIDEBAR)
     with st.sidebar:
         if st.session_state.user:
             st.markdown(f"### 🤠 Perfil")
@@ -191,7 +193,6 @@ def main():
                 img = b.get("imagen_url")
                 img_tag = f'<img src="{img}" class="ticket-img">' if img and img != 'None' else ""
                 
-                # HTML DE TARJETA (PÉGADO AL MARGEN)
                 card_html = f"""
 <div class="card-container">
 {img_tag}
@@ -205,7 +206,6 @@ def main():
 """
                 st.markdown(card_html, unsafe_allow_html=True)
                 
-                # BOTÓN DE WHATSAPP CORREGIDO
                 msg = urllib.parse.quote(f"¡Qué onda! Me interesa el boleto para {b['evento']} en MtyPass.")
                 wa_url = f"https://wa.me/{b['whatsapp']}?text={msg}"
                 st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 CONTACTAR POR WHATSAPP</a>', unsafe_allow_html=True)
