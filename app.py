@@ -3,8 +3,13 @@ from supabase import create_client, Client
 import urllib.parse
 import uuid
 
-# Configuración inicial
-st.set_page_config(page_title="MtyPass", page_icon="🎟️", layout="centered", initial_sidebar_state="collapsed")
+# Configuración inicial para móvil
+st.set_page_config(
+    page_title="MtyPass",
+    page_icon="🎟️",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
 
 # --- CSS: ESTABILIDAD Y MÓVIL ---
 def local_css():
@@ -42,29 +47,47 @@ def local_css():
     }
 
     .stTabs [aria-selected="true"] { border-bottom-color: #FF4B2B !important; }
-    
-    /* Panel Admin Info */
-    .admin-box { background-color: #1E1E1E; padding: 20px; border-radius: 15px; border-left: 5px solid #FF4B2B; }
 </style>
 """, unsafe_allow_html=True)
 
 local_css()
 
-# --- CONEXIÓN SUPABASE ---
+# --- CONEXIÓN SUPABASE CON MANEJO DE ERRORES ---
 @st.cache_resource
 def init_connection():
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    try:
+        # Verificamos si los secrets existen antes de usarlos
+        if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
+            st.error("⚠️ Faltan las credenciales de Supabase en los Secrets de Streamlit.")
+            return None
+        
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        
+        # Si la URL no empieza con http, tronará
+        if not url.startswith("http"):
+            st.error("⚠️ La SUPABASE_URL en los Secrets es inválida (debe empezar con https://).")
+            return None
+            
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"❌ Error crítico al conectar con Supabase: {e}")
+        return None
 
 supabase = init_connection()
 
-# --- LÓGICA DE NEGOCIO ---
+# --- FUNCIONES DE BASE DE DATOS ---
 def obtener_config():
-    res = supabase.table("configuracion_plataforma").select("*").eq("id", 1).execute()
-    return res.data[0] if res.data else {"comision_vendedor": 5, "comision_comprador": 10}
+    if not supabase: return {"comision_vendedor": 5, "comision_comprador": 10}
+    try:
+        res = supabase.table("configuracion_plataforma").select("*").eq("id", 1).execute()
+        return res.data[0] if res.data else {"comision_vendedor": 5, "comision_comprador": 10}
+    except:
+        return {"comision_vendedor": 5, "comision_comprador": 10}
 
 def guardar_boleto_financiero(ev, rec, precio_v, precio_p, comision, zn, wh, img, cat):
     data = {
-        "evento": ev, "recinto": rec, "precio": precio_p, # El precio principal es el publicado
+        "evento": ev, "recinto": rec, "precio": precio_p,
         "precio_vendedor": precio_v, "precio_publicado": precio_p,
         "comision_aplicada": comision, "zona": zn, "whatsapp": wh,
         "imagen_url": str(img), "categoria": cat,
@@ -74,28 +97,41 @@ def guardar_boleto_financiero(ev, rec, precio_v, precio_p, comision, zn, wh, img
 
 # --- INTERFAZ ---
 def main():
+    if not supabase:
+        st.warning("La aplicación no puede funcionar sin conexión a la base de datos. Revisa tus Secrets.")
+        return
+
     if 'user' not in st.session_state: st.session_state.user = None
     
     st.markdown("<h1 style='text-align:center;'>MtyPass</h1>", unsafe_allow_html=True)
 
     with st.sidebar:
         if st.session_state.user:
-            st.write(f"🤠 {st.session_state.user.email}")
+            st.markdown(f"### 🤠 Bienvenido")
+            st.write(st.session_state.user.email)
             if st.button("Salir"):
                 supabase.auth.sign_out()
                 st.session_state.user = None
                 st.rerun()
         else:
+            st.markdown("### Acceso")
+            mode = st.radio("Acción", ["Entrar", "Registrar"])
             e = st.text_input("Correo")
             p = st.text_input("Pass", type="password")
-            if st.button("Entrar"):
-                res = supabase.auth.sign_in_with_password({"email": e, "password": p})
-                st.session_state.user = res.user
-                st.rerun()
+            if st.button("Confirmar"):
+                try:
+                    if mode == "Entrar":
+                        res = supabase.auth.sign_in_with_password({"email": e, "password": p})
+                        st.session_state.user = res.user
+                    else:
+                        supabase.auth.sign_up({"email": e, "password": p})
+                        st.info("Cuenta creada. Ya puedes entrar.")
+                    st.rerun()
+                except Exception as ex:
+                    st.error(f"Error de acceso: {ex}")
 
     # Tabs principales
     tabs = ["Explorar", "Vender", "Mi Perfil"]
-    # Agregar Tab de Admin si es Homero
     if st.session_state.user and st.session_state.user.email == "homero.garza.g@gmail.com":
         tabs.append("Panel Admin")
     
@@ -103,11 +139,14 @@ def main():
 
     # --- EXPLORAR ---
     with choice[0]:
-        query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True).execute()
-        for b in query.data:
-            img = b.get("imagen_url")
-            img_tag = f'<img src="{img}" class="ticket-img">' if img and img != 'None' else ""
-            card_html = f"""
+        try:
+            query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True).execute()
+            if not query.data:
+                st.info("No hay boletos publicados por ahora.")
+            for b in query.data:
+                img = b.get("imagen_url")
+                img_tag = f'<img src="{img}" class="ticket-img">' if img and img != 'None' else ""
+                card_html = f"""
 <div class="card-container">
 {img_tag}
 <div class="card-body">
@@ -118,24 +157,25 @@ def main():
 </div>
 </div>
 """
-            st.markdown(card_html, unsafe_allow_html=True)
-            wa_url = f"https://wa.me/{b['whatsapp']}?text=Me+interesa+el+boleto"
-            st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 CONTACTAR</a>', unsafe_allow_html=True)
+                st.markdown(card_html, unsafe_allow_html=True)
+                wa_url = f"https://wa.me/{b['whatsapp']}?text=Me+interesa+el+boleto+para+{b['evento']}"
+                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 CONTACTAR POR WHATSAPP</a>', unsafe_allow_html=True)
+        except Exception as e:
+            st.error("Error al cargar eventos. ¿Ya creaste la tabla en Supabase?")
 
-    # --- VENDER (CÁLCULOS EN TIEMPO REAL) ---
+    # --- VENDER ---
     with choice[1]:
-        if not st.session_state.user: st.warning("Inicia sesión para vender.")
+        if not st.session_state.user: 
+            st.warning("Inicia sesión en la barra lateral para vender.")
         else:
             config = obtener_config()
             st.subheader("Publica tu Boleto")
-            
-            with st.form("vender_financiero"):
+            with st.form("vender_financiero", clear_on_submit=True):
                 ev = st.text_input("Artista / Evento")
                 rec = st.selectbox("Lugar", ["Arena Monterrey", "Estadio BBVA", "Estadio Universitario", "Auditorio Citibanamex"])
-                
-                # Cálculo Dinámico
                 precio_deseado = st.number_input("¿Cuánto quieres recibir? ($MXN)", min_value=100, step=100)
                 
+                # Cálculos
                 comision_monto = precio_deseado * (config['comision_vendedor'] / 100)
                 precio_publicado = precio_deseado + (precio_deseado * (config['comision_comprador'] / 100))
                 
@@ -145,7 +185,7 @@ def main():
                     <h3 style='margin:0;'>Recibes: ${precio_deseado:,} MXN</h3>
                     <p style='margin:0; color:#FF4B2B;'>Precio en App: ${precio_publicado:,} MXN</p>
                     <p style='font-size:0.8rem; color:#888; margin-top:5px;'>
-                    🔒 Tu pago se liberará 48 horas después de que el evento finalice, una vez validado el acceso del comprador.
+                    🔒 Pago liberado 48h tras el evento.
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
@@ -154,61 +194,44 @@ def main():
                 wh = st.text_input("WhatsApp (52...)")
                 ft = st.file_uploader("Foto del boleto", type=['jpg', 'png', 'jpeg'])
                 cat = st.selectbox("Categoría", ["Conciertos", "Deportes", "Teatro"])
-
-                st.divider()
-                with st.expander("Términos y Condiciones (Escrow MtyPass)"):
-                    st.write("""
-                    MtyPass retiene el pago del comprador para garantizar la validez del boleto. 
-                    El vendedor acepta que el dinero será depositado 48 horas después del evento. 
-                    Cualquier reporte de boleto falso resultará en la cancelación del pago y baneo permanente.
-                    """)
-                
                 acepto = st.checkbox("Acepto los Términos y esquema de pagos diferidos.")
                 
                 if st.form_submit_button("PUBLICAR BOLETO"):
-                    if ev and wh and acepto:
-                        try:
-                            # Subir imagen
-                            fname = f"{uuid.uuid4()}.jpg"
-                            supabase.storage.from_('boletos_imagenes').upload(fname, ft.getvalue())
-                            url = supabase.storage.from_('boletos_imagenes').get_public_url(fname)
-                            # Guardar con datos financieros
-                            guardar_boleto_financiero(ev, rec, precio_deseado, precio_publicado, comision_monto, zn, wh, url, cat)
-                            st.success("¡Publicado! Se verá con el precio ajustado por comisión.")
-                            st.rerun()
-                        except: st.error("Error al publicar")
-                    elif not acepto: st.error("Debes aceptar los términos, compadre.")
+                    if ev and wh and acepto and ft:
+                        with st.spinner("Subiendo publicación..."):
+                            try:
+                                fname = f"{uuid.uuid4()}.jpg"
+                                supabase.storage.from_('boletos_imagenes').upload(fname, ft.getvalue())
+                                url = supabase.storage.from_('boletos_imagenes').get_public_url(fname)
+                                guardar_boleto_financiero(ev, rec, precio_deseado, precio_publicado, comision_monto, zn, wh, url, cat)
+                                st.success("¡Publicado exitosamente!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al subir: {e}")
+                    else:
+                        st.warning("Llena todos los campos y acepta los términos, compadre.")
 
     # --- MI PERFIL ---
     with choice[2]:
         if st.session_state.user:
-            st.subheader("Mis Ventas")
+            st.subheader("Mis Publicaciones")
             res = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute()
             for b in res.data:
-                st.info(f"{b['evento']} | Publicado: ${b['precio_publicado']} | Status Pago: {b['status_pago']}")
-        else: st.write("Inicia sesión.")
+                st.info(f"{b['evento']} | Publicado: ${b['precio_publicado']} | Pago: {b['status_pago']}")
+        else: st.write("Inicia sesión para ver tu actividad.")
 
-    # --- PANEL ADMIN (SOLO HOMERO) ---
+    # --- PANEL ADMIN ---
     if st.session_state.user and st.session_state.user.email == "homero.garza.g@gmail.com":
         with choice[-1]:
-            st.subheader("Panel de Control MtyPass")
+            st.subheader("Configuración de Comisiones")
             config = obtener_config()
-            
             with st.form("config_admin"):
                 cv = st.slider("% Comisión Vendedor", 0, 30, int(config['comision_vendedor']))
                 cc = st.slider("% Comisión Comprador", 0, 30, int(config['comision_comprador']))
-                
-                if st.form_submit_button("Guardar Configuración"):
-                    supabase.table("configuracion_plataforma").update({
-                        "comision_vendedor": cv,
-                        "comision_comprador": cc
-                    }).eq("id", 1).execute()
-                    st.success("¡Configuración actualizada!")
+                if st.form_submit_button("Actualizar"):
+                    supabase.table("configuracion_plataforma").update({"comision_vendedor": cv, "comision_comprador": cc}).eq("id", 1).execute()
+                    st.success("Configuración guardada.")
                     st.rerun()
-            
-            st.markdown("---")
-            st.write("Ventas Totales en la Plataforma")
-            # Aquí podrías agregar un resumen de todas las ventas de la DB
 
 if __name__ == "__main__":
     main()
