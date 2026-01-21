@@ -11,17 +11,30 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS PARA MÁXIMA VISIBILIDAD (LETRAS BLANCAS) ---
+# --- CSS: CORRECCIÓN DE COLORES EN MÓVIL Y SIDEBAR ---
 def local_css():
     st.markdown("""
 <style>
-    /* Fondo Negro Puro */
+    /* Fondo General Negro */
     .stApp { background-color: #000000; color: #FFFFFF; }
     
-    /* Forzar letras blancas en etiquetas y textos */
-    label, p, span, .stMarkdown { color: #FFFFFF !important; font-weight: 500 !important; }
+    /* FIX SIDEBAR: Forzar color oscuro y letras blancas en móvil */
+    section[data-testid="stSidebar"] {
+        background-color: #121212 !important;
+    }
+    section[data-testid="stSidebar"] * {
+        color: #FFFFFF !important;
+    }
     
-    /* Inputs con letras blancas y fondo gris oscuro */
+    /* Botón de flecha para desplegar sidebar en móvil */
+    button[kind="header"] {
+        color: #FFFFFF !important;
+        background-color: transparent !important;
+    }
+
+    /* Inputs y Selectores: Letras Blancas */
+    label, p, span, .stMarkdown { color: #FFFFFF !important; }
+    
     .stTextInput input, .stSelectbox div[data-baseweb="select"], .stNumberInput input {
         background-color: #1E1E1E !important;
         color: #FFFFFF !important;
@@ -29,7 +42,7 @@ def local_css():
         border-radius: 12px !important;
     }
 
-    /* Botón Principal Regio */
+    /* Botón Principal Rojo MtyPass */
     div.stButton > button:first-child {
         background-color: #FF4B2B;
         color: white !important;
@@ -63,10 +76,10 @@ def local_css():
         object-fit: cover;
     }
 
-    /* Botón WhatsApp (Verde con letras blancas) */
+    /* BOTÓN WHATSAPP: Verde con letras blancas */
     .wa-link {
         display: block;
-        background-color: #25D366;
+        background-color: #25D366 !important;
         color: #FFFFFF !important;
         text-align: center;
         padding: 15px;
@@ -74,6 +87,7 @@ def local_css():
         text-decoration: none;
         font-weight: 800;
         margin-bottom: 30px;
+        font-size: 1rem;
     }
 
     /* Tabs */
@@ -133,17 +147,20 @@ def guardar_boleto(evento, recinto, precio, zona, whatsapp, img_url, categoria):
 def main():
     st.markdown("<h1 style='text-align:center;'>MtyPass</h1>", unsafe_allow_html=True)
 
+    # BARRA LATERAL (SIDEBAR)
     with st.sidebar:
         if st.session_state.user:
-            st.write(f"🤠 {st.session_state.user.email}")
+            st.markdown(f"### 🤠 Perfil")
+            st.write(st.session_state.user.email)
             if st.button("Cerrar Sesión"):
                 supabase.auth.sign_out()
                 st.session_state.user = None
                 st.rerun()
         else:
-            mode = st.radio("Acceso", ["Entrar", "Registrar"])
+            st.markdown("### Acceso")
+            mode = st.radio("Acción", ["Entrar", "Registrar"])
             e = st.text_input("Correo")
-            p = st.text_input("Pass", type="password")
+            p = st.text_input("Contraseña", type="password")
             if st.button("Confirmar"):
                 auth_user(e, p, "login" if mode == "Entrar" else "reg")
 
@@ -174,7 +191,7 @@ def main():
                 img = b.get("imagen_url")
                 img_tag = f'<img src="{img}" class="ticket-img">' if img and img != 'None' else ""
                 
-                # HTML SIN ESPACIOS AL PRINCIPIO PARA EVITAR ERROR DE CÓDIGO
+                # HTML DE TARJETA (PÉGADO AL MARGEN)
                 card_html = f"""
 <div class="card-container">
 {img_tag}
@@ -188,50 +205,52 @@ def main():
 """
                 st.markdown(card_html, unsafe_allow_html=True)
                 
+                # BOTÓN DE WHATSAPP CORREGIDO
                 msg = urllib.parse.quote(f"¡Qué onda! Me interesa el boleto para {b['evento']} en MtyPass.")
                 wa_url = f"https://wa.me/{b['whatsapp']}?text={msg}"
-                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 CONTACTAR VENDEDOR</a>', unsafe_allow_html=True)
+                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 CONTACTAR POR WHATSAPP</a>', unsafe_allow_html=True)
 
     # --- VENDER ---
     with choice[1]:
         if not st.session_state.user:
-            st.warning("Inicia sesión para publicar.")
+            st.warning("Inicia sesión en la barra lateral para publicar.")
         else:
             with st.form("vender_form", clear_on_submit=True):
-                ev = st.text_input("Nombre del Evento")
+                ev = st.text_input("Nombre del Artista o Evento")
                 col1, col2 = st.columns(2)
                 with col1:
                     rec = st.selectbox("Recinto", ["Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario"])
                 with col2:
                     ct = st.selectbox("Categoría", ["Conciertos", "Deportes", "Teatro"])
-                pr = st.number_input("Precio", min_value=100)
+                pr = st.number_input("Precio ($MXN)", min_value=100)
                 zn = st.text_input("Sección / Zona")
-                wh = st.text_input("WhatsApp (52...)")
-                ft = st.file_uploader("Foto", type=['jpg', 'png', 'jpeg'])
+                wh = st.text_input("Tu WhatsApp (Ej: 5281...)")
+                ft = st.file_uploader("Foto del boleto", type=['jpg', 'png', 'jpeg'])
                 
                 if st.form_submit_button("PUBLICAR BOLETO"):
                     if ev and wh:
                         with st.spinner("Subiendo..."):
                             url = upload_image(ft)
                             guardar_boleto(ev, rec, pr, zn, wh, url, ct)
-                            st.success("¡Listo!")
+                            st.success("¡Publicado!")
                             st.rerun()
 
     # --- MIS VENTAS ---
     with choice[2]:
         if st.session_state.user:
             mis = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute().data
+            if not mis: st.write("No tienes ventas aún.")
             for b in mis:
                 with st.expander(f"{b['evento']} - {b['estado']}"):
                     if b['estado'] == 'disponible':
-                        if st.button("Vendido", key=f"s_{b['id']}"):
+                        if st.button("Marcar Vendido", key=f"s_{b['id']}"):
                             supabase.table("boletos").update({"estado": "vendido"}).eq("id", b['id']).execute()
                             st.rerun()
-                    if st.button("Borrar", key=f"d_{b['id']}"):
+                    if st.button("Borrar Publicación", key=f"d_{b['id']}"):
                         supabase.table("boletos").delete().eq("id", b['id']).execute()
                         st.rerun()
         else:
-            st.write("Entra para ver tus ventas.")
+            st.write("Inicia sesión para ver tus ventas.")
 
 if __name__ == "__main__":
     main()
