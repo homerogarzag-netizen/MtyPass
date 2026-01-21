@@ -1,8 +1,9 @@
 import streamlit as st
 from supabase import create_client, Client
 import urllib.parse
+import uuid
 
-# Configuración inicial de la página
+# Configuración inicial
 st.set_page_config(
     page_title="MtyPass | Marketplace",
     page_icon="🎟️",
@@ -10,44 +11,43 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- INYECCIÓN DE CSS PERSONALIZADO (DARK MODE) ---
+# --- CSS PERSONALIZADO (DARK MODE & IMAGES) ---
 def local_css():
     st.markdown(
         """
         <style>
         .stApp { background-color: #121212; color: #FFFFFF; }
         
-        /* Estilo de los Botones Principales */
         div.stButton > button:first-child {
             background-color: #FF4B2B; color: white; border-radius: 12px;
-            border: none; height: 3.5rem; width: 100%; font-size: 1.1rem;
-            font-weight: bold; margin-top: 10px;
+            border: none; height: 3.5rem; width: 100%; font-weight: bold;
         }
 
-        /* Tarjetas de Eventos */
         .event-card {
-            background-color: #1E1E1E; padding: 1.5rem; border-radius: 15px;
-            border: 1px solid #333; margin-bottom: 5px;
+            background-color: #1E1E1E; border-radius: 15px;
+            border: 1px solid #333; margin-bottom: 20px; overflow: hidden;
         }
+        
+        .card-content { padding: 1.5rem; }
         
         .price-tag { color: #FF4B2B; font-size: 1.4rem; font-weight: bold; }
 
-        /* Estilo del botón de WhatsApp */
         .whatsapp-btn {
             background-color: #25D366; color: white !important; padding: 12px;
             text-decoration: none; border-radius: 12px; display: block;
-            text-align: center; font-weight: bold; margin-top: 10px;
-            font-size: 1rem; transition: 0.3s;
+            text-align: center; font-weight: bold; margin: 10px 1.5rem 1.5rem 1.5rem;
         }
-        .whatsapp-btn:hover { background-color: #128C7E; transform: scale(1.02); }
 
-        /* Inputs */
+        .ticket-img {
+            width: 100%; height: 200px; object-fit: cover;
+            border-bottom: 1px solid #333;
+        }
+
         .stTextInput input, .stSelectbox div, .stNumberInput input {
             background-color: #1E1E1E !important; color: white !important;
-            border-radius: 10px !important;
         }
         
-        h1, h2, h3 { color: #FF4B2B; font-family: 'Inter', sans-serif; }
+        h1, h2, h3 { color: #FF4B2B; }
         </style>
         """,
         unsafe_allow_html=True
@@ -58,13 +58,9 @@ local_css()
 # --- CONEXIÓN A SUPABASE ---
 @st.cache_resource
 def init_connection():
-    try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
-    except Exception as e:
-        st.error(f"Error de conexión con Supabase: {e}")
-        return None
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
 supabase = init_connection()
 
@@ -76,130 +72,123 @@ def login_user(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         st.session_state.user = res.user
-        st.success("¡Ya entraste, compadre!")
         st.rerun()
     except Exception as e:
         st.error(f"Error al entrar: {e}")
 
-def register_user(email, password):
+# --- FUNCIONES DE STORAGE Y DB ---
+def upload_image(file):
+    if file is None:
+        return None
     try:
-        res = supabase.auth.sign_up({"email": email, "password": password})
-        st.info("¡Registro enviado! Como ya quitamos el switch, intenta loguearte ahora mismo.")
+        file_extension = file.name.split('.')[-1]
+        file_name = f"{uuid.uuid4()}.{file_extension}"
+        # Subir a bucket 'boletos_imagenes'
+        supabase.storage.from_('boletos_imagenes').upload(file_name, file.getvalue())
+        # Obtener URL pública
+        url_res = supabase.storage.from_('boletos_imagenes').get_public_url(file_name)
+        return url_res
     except Exception as e:
-        st.error(f"Error al registrar: {e}")
+        st.error(f"Error subiendo imagen: {e}")
+        return None
 
-# --- FUNCIONES DE DB ---
-def obtener_boletos(filtro_recinto="Todos"):
-    try:
-        query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True)
-        if filtro_recinto != "Todos":
-            query = query.eq("recinto", filtro_recinto)
-        return query.execute().data
-    except:
-        return []
-
-def guardar_boleto(evento, recinto, precio, zona, whatsapp):
+def guardar_boleto(evento, recinto, precio, zona, whatsapp, img_url):
     data = {
-        "evento": evento,
-        "recinto": recinto,
-        "precio": precio,
-        "zona": zona,
-        "whatsapp": whatsapp,
-        "vendedor_email": st.session_state.user.email,
-        "estado": "disponible"
+        "evento": evento, "recinto": recinto, "precio": precio,
+        "zona": zona, "whatsapp": whatsapp, "imagen_url": img_url,
+        "vendedor_email": st.session_state.user.email, "estado": "disponible"
     }
     return supabase.table("boletos").insert(data).execute()
 
-# --- INTERFAZ PRINCIPAL ---
+# --- INTERFAZ ---
 def main():
-    st.markdown("<h1 style='text-align: center; margin-bottom: 0;'>🎟️ MtyPass</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🎟️ MtyPass</h1>", unsafe_allow_html=True)
 
-    # Sidebar: Gestión de Usuario
     with st.sidebar:
         if st.session_state.user:
-            st.markdown(f"### 🤠 Perfil Regio")
-            st.write(f"Email: {st.session_state.user.email}")
+            st.markdown(f"### 🤠 Perfil: {st.session_state.user.email}")
             if st.button("Cerrar Sesión"):
                 supabase.auth.sign_out()
                 st.session_state.user = None
                 st.rerun()
         else:
-            st.markdown("### Acceso")
-            email = st.text_input("Correo electrónico")
+            st.subheader("Acceso")
+            email = st.text_input("Correo")
             password = st.text_input("Contraseña", type="password")
-            col1, col2 = st.columns(2)
-            if col1.button("Entrar"):
+            if st.button("Entrar"):
                 login_user(email, password)
-            if col2.button("Registrar"):
-                register_user(email, password)
 
     menu = ["Explorar", "Vender", "Mis Ventas"]
     choice = st.tabs(menu)
 
-    # --- PESTAÑA: EXPLORAR ---
+    # --- EXPLORAR ---
     with choice[0]:
-        recinto_filtro = st.selectbox("¿A dónde quieres ir?", 
-                             ["Todos", "Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario", "Foro Tims"])
+        recinto_f = st.selectbox("¿A dónde vas?", ["Todos", "Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario"])
         
-        boletos_lista = obtener_boletos(recinto_filtro)
+        query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True)
+        if recinto_f != "Todos":
+            query = query.eq("recinto", recinto_f)
+        
+        boletos = query.execute().data
 
-        if not boletos_lista:
-            st.info("No hay boletos disponibles por ahora. ¡Sé el primero en vender!")
+        if not boletos:
+            st.info("No hay boletos por ahora.")
         else:
-            for boleto in boletos_lista:
+            for b in boletos:
                 with st.container():
+                    # Card con o sin imagen
+                    img_html = f'<img src="{b["imagen_url"]}" class="ticket-img">' if b.get("imagen_url") else ""
+                    
                     st.markdown(f"""
                     <div class="event-card">
-                        <p style='color: #FF4B2B; font-weight: bold; margin-bottom: 5px;'>{boleto['recinto']}</p>
-                        <h3 style='margin: 0; color: white;'>{boleto['evento']}</h3>
-                        <p style='color: #BBB; margin-bottom: 10px;'>Zona: {boleto['zona']}</p>
-                        <p class="price-tag">${boleto['precio']:,} MXN</p>
+                        {img_html}
+                        <div class="card-content">
+                            <p style='color: #FF4B2B; font-weight: bold; margin-bottom: 5px;'>{b['recinto']}</p>
+                            <h3 style='margin: 0;'>{b['evento']}</h3>
+                            <p style='color: #BBB;'>Zona: {b['zona']}</p>
+                            <p class="price-tag">${b['precio']:,} MXN</p>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Generar Link de WhatsApp
-                    msg = urllib.parse.quote(f"¡Qué onda! Me interesa tu boleto para {boleto['evento']} en {boleto['recinto']} que vi en MtyPass.")
-                    wa_link = f"https://wa.me/{boleto['whatsapp']}?text={msg}"
-                    
-                    st.markdown(f'<a href="{wa_link}" target="_blank" class="whatsapp-btn">📱 Contactar por WhatsApp</a>', unsafe_allow_html=True)
-                    st.write("") 
+                    msg = urllib.parse.quote(f"¡Qué onda! Me interesa tu boleto para {b['evento']} en MtyPass.")
+                    st.markdown(f'<a href="https://wa.me/{b["whatsapp"]}?text={msg}" target="_blank" class="whatsapp-btn">📱 Contactar por WhatsApp</a>', unsafe_allow_html=True)
 
-    # --- PESTAÑA: VENDER ---
+    # --- VENDER ---
     with choice[1]:
         if not st.session_state.user:
-            st.warning("🔒 Inicia sesión en la barra lateral para publicar tus boletos.")
+            st.warning("Inicia sesión para vender.")
         else:
             st.subheader("Publica tu boleto")
             with st.form("vender_form", clear_on_submit=True):
-                evento = st.text_input("Artista / Evento")
-                recinto_vta = st.selectbox("Recinto", ["Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario", "Foro Tims"])
-                precio = st.number_input("Precio ($MXN)", min_value=100, step=100)
-                zona = st.text_input("Zona / Sección")
-                whatsapp = st.text_input("Tu WhatsApp (Ej: 528188889999)")
+                evento = st.text_input("Evento")
+                recinto = st.selectbox("Recinto", ["Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario"])
+                precio = st.number_input("Precio ($MXN)", min_value=100)
+                zona = st.text_input("Zona")
+                whatsapp = st.text_input("WhatsApp (Ej: 5281...)")
+                foto = st.file_uploader("Sube foto del boleto o vista (Tapa códigos)", type=['jpg', 'png', 'jpeg'])
                 
-                if st.form_submit_button("Publicar Boleto"):
-                    if evento and zona and whatsapp:
-                        guardar_boleto(evento, recinto_vta, precio, zona, whatsapp)
+                if st.form_submit_button("Publicar"):
+                    if evento and whatsapp:
+                        url_foto = upload_image(foto)
+                        guardar_boleto(evento, recinto, precio, zona, whatsapp, url_foto)
                         st.balloons()
-                        st.success("¡Listo! Tu boleto ya aparece en Explorar.")
+                        st.success("¡Boleto en línea!")
                     else:
-                        st.warning("Faltan campos por llenar.")
+                        st.error("Llena los campos obligatorios.")
 
-    # --- PESTAÑA: MIS VENTAS ---
+    # --- MIS VENTAS ---
     with choice[2]:
         if st.session_state.user:
-            st.subheader("Tus publicaciones")
-            mis_boletos = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute().data
-            if mis_boletos:
-                for b in mis_boletos:
-                    with st.expander(f"📌 {b['evento']} - ${b['precio']}"):
-                        if st.button("Marcar como Vendido", key=f"del_{b['id']}"):
+            mis_b = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute().data
+            for b in mis_b:
+                with st.expander(f"📌 {b['evento']} ({b['estado']})"):
+                    if b['estado'] == 'disponible':
+                        if st.button("Marcar como Vendido", key=f"sold_{b['id']}"):
                             supabase.table("boletos").update({"estado": "vendido"}).eq("id", b['id']).execute()
                             st.rerun()
-            else:
-                st.write("Aún no tienes ventas.")
         else:
-            st.info("Inicia sesión para ver tus boletos.")
+            st.info("Inicia sesión para ver tus ventas.")
 
 if __name__ == "__main__":
     main()
