@@ -17,13 +17,11 @@ def local_css():
 <style>
     .stApp { background-color: #121212; color: #FFFFFF; }
     
-    /* Botones de Streamlit */
     div.stButton > button:first-child {
         background-color: #FF4B2B; color: white; border-radius: 12px;
         border: none; height: 3.5rem; width: 100%; font-weight: bold;
     }
 
-    /* Tarjeta de Evento */
     .card-container {
         background-color: #1E1E1E;
         border-radius: 15px;
@@ -42,11 +40,10 @@ def local_css():
 
     .ticket-img {
         width: 100%;
-        height: 200px;
+        height: 250px;
         object-fit: cover;
     }
 
-    /* Botón de WhatsApp */
     .wa-link {
         display: block;
         background-color: #25D366;
@@ -88,7 +85,7 @@ def auth_user(email, password, mode="login"):
             st.session_state.user = res.user
         else:
             supabase.auth.sign_up({"email": email, "password": password})
-            st.info("Cuenta creada, ya puedes iniciar sesión.")
+            st.info("¡Cuenta creada! Ya puedes iniciar sesión.")
         st.rerun()
     except Exception as e:
         st.error(f"Error: {e}")
@@ -101,16 +98,16 @@ def upload_image(file):
         file_name = f"{uuid.uuid4()}.{file_ext}"
         supabase.storage.from_('boletos_imagenes').upload(file_name, file.getvalue())
         res = supabase.storage.from_('boletos_imagenes').get_public_url(file_name)
-        # Manejo de respuesta de Supabase URL
-        return res if isinstance(res, str) else res
+        return res
     except Exception as e:
         st.error(f"Error subiendo: {e}")
         return None
 
-def guardar_boleto(evento, recinto, precio, zona, whatsapp, img_url):
+def guardar_boleto(evento, recinto, precio, zona, whatsapp, img_url, categoria):
     data = {
         "evento": evento, "recinto": recinto, "precio": precio,
         "zona": zona, "whatsapp": whatsapp, "imagen_url": str(img_url),
+        "categoria": categoria,
         "vendedor_email": st.session_state.user.email, "estado": "disponible"
     }
     return supabase.table("boletos").insert(data).execute()
@@ -138,27 +135,39 @@ def main():
 
     # --- EXPLORAR ---
     with choice[0]:
-        recinto_f = st.selectbox("¿A dónde quieres ir?", ["Todos", "Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario"])
+        # BUSCADOR Y FILTROS
+        col_search, col_cat = st.columns([2, 1])
+        with col_search:
+            search_query = st.text_input("🔍 Buscar artista o evento", placeholder="Ej: Luis Miguel, Rayados...")
+        with col_cat:
+            cat_filtro = st.selectbox("Categoría", ["Todas", "Conciertos", "Deportes", "Teatro", "Festivales"])
+
+        recinto_f = st.selectbox("Recinto", ["Todos", "Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario"])
         
+        # Lógica de Query
         query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True)
+        
         if recinto_f != "Todos":
             query = query.eq("recinto", recinto_f)
-        
+        if cat_filtro != "Todas":
+            query = query.eq("categoria", cat_filtro)
+        if search_query:
+            query = query.ilike("evento", f"%{search_query}%")
+            
         boletos = query.execute().data
 
         if not boletos:
-            st.info("No hay boletos disponibles.")
+            st.info("No se encontraron boletos con esos filtros, compadre.")
         else:
             for b in boletos:
                 img_url = b.get("imagen_url")
-                # IMPORTANTE: El HTML debe ir pegado al margen para que Streamlit no lo crea código
                 img_tag = f'<img src="{img_url}" class="ticket-img">' if img_url and img_url != 'None' else ""
                 
                 card_html = f"""
 <div class="card-container">
 {img_tag}
 <div class="card-body">
-<p style='color: #FF4B2B; font-weight: bold; margin-bottom: 0;'>{b['recinto']}</p>
+<p style='color: #FF4B2B; font-weight: bold; margin-bottom: 0;'>{b['recinto']} | {b.get('categoria', 'Evento')}</p>
 <h3 style='margin-top: 0; margin-bottom: 5px; color: white;'>{b['evento']}</h3>
 <p style='color: #BBB; margin-bottom: 0;'>Zona: {b['zona']}</p>
 <p class="price-tag">${b['precio']:,} MXN</p>
@@ -167,7 +176,7 @@ def main():
 """
                 st.markdown(card_html, unsafe_allow_html=True)
                 
-                msg = urllib.parse.quote(f"¡Qué onda! Me interesa el boleto para {b['evento']} en {b['recinto']} que vi en MtyPass.")
+                msg = urllib.parse.quote(f"¡Qué onda! Me interesa el boleto para {b['evento']} que vi en MtyPass.")
                 wa_url = f"https://wa.me/{b['whatsapp']}?text={msg}"
                 st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 Contactar por WhatsApp</a>', unsafe_allow_html=True)
 
@@ -179,18 +188,23 @@ def main():
             with st.form("vender_form", clear_on_submit=True):
                 st.subheader("Publica tu boleto")
                 evento = st.text_input("Artista / Evento")
-                lugar = st.selectbox("Lugar", ["Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario"])
+                col_v1, col_v2 = st.columns(2)
+                with col_v1:
+                    lugar = st.selectbox("Lugar", ["Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario"])
+                with col_v2:
+                    categoria = st.selectbox("Categoría", ["Conciertos", "Deportes", "Teatro", "Festivales"])
+                
                 precio = st.number_input("Precio ($MXN)", min_value=100)
                 zona = st.text_input("Zona")
                 wa = st.text_input("WhatsApp (Ej: 5281...)")
-                foto = st.file_uploader("Foto del boleto", type=['jpg', 'png', 'jpeg'])
+                foto = st.file_uploader("Foto del boleto o vista", type=['jpg', 'png', 'jpeg'])
                 
                 if st.form_submit_button("Publicar"):
                     if evento and wa:
-                        with st.spinner("Subiendo publicación..."):
+                        with st.spinner("Subiendo..."):
                             url = upload_image(foto)
-                            guardar_boleto(evento, lugar, precio, zona, wa, url)
-                            st.success("¡Publicado exitosamente!")
+                            guardar_boleto(evento, lugar, precio, zona, wa, url, categoria)
+                            st.success("¡Publicado!")
                             st.rerun()
 
     # --- MIS VENTAS ---
@@ -198,14 +212,15 @@ def main():
         if st.session_state.user:
             st.subheader("Tus publicaciones")
             mis_b = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute().data
-            if not mis_b:
-                st.write("No has publicado nada aún.")
             for b in mis_b:
                 with st.expander(f"📌 {b['evento']} - {b['estado']}"):
                     if b['estado'] == 'disponible':
                         if st.button("Marcar como Vendido", key=f"sold_{b['id']}"):
                             supabase.table("boletos").update({"estado": "vendido"}).eq("id", b['id']).execute()
                             st.rerun()
+                    if st.button("Eliminar Publicación", key=f"del_{b['id']}"):
+                        supabase.table("boletos").delete().eq("id", b['id']).execute()
+                        st.rerun()
         else:
             st.info("Inicia sesión para ver tus boletos.")
 
