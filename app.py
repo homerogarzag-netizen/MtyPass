@@ -79,6 +79,7 @@ local_css()
 @st.cache_resource
 def init_connection():
     try:
+        # Intentamos obtener las credenciales de st.secrets
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
@@ -106,8 +107,7 @@ def main():
         recinto = st.selectbox("Filtrar por recinto:", 
                              ["Todos", "Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario", "Live Out / Pa'l Norte"])
 
-        # Placeholder de tarjetas de boletos
-        # Nota: Aquí haremos la integración con la base de datos más adelante
+        # Layout de tarjetas
         col1, col2 = st.columns(2)
         
         with col1:
