@@ -3,33 +3,24 @@ from supabase import create_client, Client
 import urllib.parse
 import uuid
 
-# Configuración inicial para móvil
-st.set_page_config(
-    page_title="MtyPass",
-    page_icon="🎟️",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
+# Configuración inicial
+st.set_page_config(page_title="MtyPass", page_icon="🎟️", layout="centered", initial_sidebar_state="collapsed")
 
-# --- CSS: ESTABILIDAD Y VISIBILIDAD ---
+# --- CSS: ESTABILIDAD Y MÓVIL ---
 def local_css():
     st.markdown("""
 <style>
     .stApp { background-color: #000000; color: #FFFFFF; }
     section[data-testid="stSidebar"] { background-color: #121212 !important; }
-    section[data-testid="stSidebar"] * { color: #FFFFFF !important; }
-    button[kind="header"] { background-color: #1E1E1E !important; color: #FF4B2B !important; }
-
-    /* Inputs y Selectores */
-    label, p, span { color: #FFFFFF !important; }
+    label, p, span, .stMarkdown { color: #FFFFFF !important; }
+    
+    /* Inputs */
     .stTextInput input, .stSelectbox div[data-baseweb="select"], .stNumberInput input {
-        background-color: #1E1E1E !important;
-        color: #FFFFFF !important;
-        border: 1px solid #444 !important;
-        border-radius: 12px !important;
+        background-color: #1E1E1E !important; color: #FFFFFF !important;
+        border: 1px solid #444 !important; border-radius: 12px !important;
     }
 
-    /* Botones */
+    /* Botón Rojo MtyPass */
     div.stButton > button:first-child {
         background-color: #FF4B2B; color: white !important;
         border-radius: 12px; border: none; height: 3.5rem; width: 100%; font-weight: bold;
@@ -43,183 +34,181 @@ def local_css():
     .card-body { padding: 15px; }
     .price-tag { color: #FF4B2B; font-size: 1.5rem; font-weight: bold; }
     .ticket-img { width: 100%; height: 250px; object-fit: cover; }
-    .view-count { color: #888; font-size: 0.8rem; margin-top: 5px; }
-
-    /* Botón WhatsApp */
+    
     .wa-link {
         display: block; background-color: #25D366 !important; color: #FFFFFF !important;
         text-align: center; padding: 15px; border-radius: 12px;
-        text-decoration: none; font-weight: 800; margin-bottom: 10px; font-size: 1rem;
+        text-decoration: none; font-weight: 800; margin-bottom: 30px;
     }
 
-    .stTabs [data-baseweb="tab"] { color: #FFFFFF !important; }
     .stTabs [aria-selected="true"] { border-bottom-color: #FF4B2B !important; }
+    
+    /* Panel Admin Info */
+    .admin-box { background-color: #1E1E1E; padding: 20px; border-radius: 15px; border-left: 5px solid #FF4B2B; }
 </style>
 """, unsafe_allow_html=True)
 
 local_css()
 
-# --- CONEXIÓN A SUPABASE ---
+# --- CONEXIÓN SUPABASE ---
 @st.cache_resource
 def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_connection()
 
-# --- MANEJO DE SESIÓN Y LÓGICA ---
-if 'user' not in st.session_state:
-    st.session_state.user = None
-if 'vistos' not in st.session_state:
-    st.session_state.vistos = set()
+# --- LÓGICA DE NEGOCIO ---
+def obtener_config():
+    res = supabase.table("configuracion_plataforma").select("*").eq("id", 1).execute()
+    return res.data[0] if res.data else {"comision_vendedor": 5, "comision_comprador": 10}
 
-def registrar_vista(boleto_id, vistas_actuales):
-    # Solo contar una vista por sesión para no inflar el número
-    if boleto_id not in st.session_state.vistos:
-        nuevas_vistas = (vistas_actuales or 0) + 1
-        supabase.table("boletos").update({"vistas": nuevas_vistas}).eq("id", boleto_id).execute()
-        st.session_state.vistos.add(boleto_id)
-
-def toggle_favorito(boleto_id):
-    if not st.session_state.user:
-        st.error("Inicia sesión primero")
-        return
-    email = st.session_state.user.email
-    existente = supabase.table("favoritos").select("*").eq("user_email", email).eq("boleto_id", boleto_id).execute().data
-    if existente:
-        supabase.table("favoritos").delete().eq("user_email", email).eq("boleto_id", boleto_id).execute()
-        st.toast("Eliminado de favoritos")
-    else:
-        supabase.table("favoritos").insert({"user_email": email, "boleto_id": boleto_id}).execute()
-        st.toast("❤️ Guardado en favoritos")
-    st.rerun()
+def guardar_boleto_financiero(ev, rec, precio_v, precio_p, comision, zn, wh, img, cat):
+    data = {
+        "evento": ev, "recinto": rec, "precio": precio_p, # El precio principal es el publicado
+        "precio_vendedor": precio_v, "precio_publicado": precio_p,
+        "comision_aplicada": comision, "zona": zn, "whatsapp": wh,
+        "imagen_url": str(img), "categoria": cat,
+        "vendedor_email": st.session_state.user.email, "status_pago": "Pendiente"
+    }
+    return supabase.table("boletos").insert(data).execute()
 
 # --- INTERFAZ ---
 def main():
+    if 'user' not in st.session_state: st.session_state.user = None
+    
     st.markdown("<h1 style='text-align:center;'>MtyPass</h1>", unsafe_allow_html=True)
 
     with st.sidebar:
         if st.session_state.user:
-            st.markdown(f"### 🤠 Perfil\n{st.session_state.user.email}")
-            if st.button("Cerrar Sesión"):
+            st.write(f"🤠 {st.session_state.user.email}")
+            if st.button("Salir"):
                 supabase.auth.sign_out()
                 st.session_state.user = None
                 st.rerun()
         else:
-            mode = st.radio("Acceso", ["Entrar", "Registrar"])
             e = st.text_input("Correo")
-            p = st.text_input("Contraseña", type="password")
-            if st.button("Confirmar"):
-                try:
-                    if mode == "Entrar":
-                        res = supabase.auth.sign_in_with_password({"email": e, "password": p})
-                        st.session_state.user = res.user
-                    else:
-                        supabase.auth.sign_up({"email": e, "password": p})
-                        st.info("Cuenta creada")
-                    st.rerun()
-                except Exception as ex: st.error(f"Error: {ex}")
+            p = st.text_input("Pass", type="password")
+            if st.button("Entrar"):
+                res = supabase.auth.sign_in_with_password({"email": e, "password": p})
+                st.session_state.user = res.user
+                st.rerun()
 
-    menu = ["Explorar", "Vender", "Mi Perfil"]
-    choice = st.tabs(menu)
+    # Tabs principales
+    tabs = ["Explorar", "Vender", "Mi Perfil"]
+    # Agregar Tab de Admin si es Homero
+    if st.session_state.user and st.session_state.user.email == "homero.garza.g@gmail.com":
+        tabs.append("Panel Admin")
+    
+    choice = st.tabs(tabs)
 
     # --- EXPLORAR ---
     with choice[0]:
-        busqueda = st.text_input("🔍 Buscar artista...", placeholder="Ej: Luis Miguel")
-        c1, c2 = st.columns(2)
-        with c1: cat = st.selectbox("Categoría", ["Todas", "Conciertos", "Deportes", "Teatro"])
-        with c2: lug = st.selectbox("Lugar", ["Todos", "Arena Monterrey", "Estadio BBVA", "Estadio Universitario"])
-        
-        query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True)
-        if lug != "Todos": query = query.eq("recinto", lug)
-        if cat != "Todas": query = query.eq("categoria", cat)
-        if busqueda: query = query.ilike("evento", f"%{busqueda}%")
-        boletos = query.execute().data
-
-        for b in boletos:
-            # Registrar vista automáticamente
-            registrar_vista(b['id'], b.get('vistas', 0))
-            
+        query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True).execute()
+        for b in query.data:
             img = b.get("imagen_url")
             img_tag = f'<img src="{img}" class="ticket-img">' if img and img != 'None' else ""
             card_html = f"""
 <div class="card-container">
 {img_tag}
 <div class="card-body">
-<p style='color:#FF4B2B; font-weight:700; margin-bottom:0;'>{b['recinto']} • {b.get('categoria', 'Evento')}</p>
-<h3 style='margin:0; color:white;'>{b['evento']}</h3>
+<p style='color:#FF4B2B; font-weight:700; margin-bottom:0;'>{b['recinto']}</p>
+<h3 style='margin:0;'>{b['evento']}</h3>
 <p style='color:#DDD; margin-bottom:0;'>Zona: {b['zona']}</p>
 <p class="price-tag">${b['precio']:,} MXN</p>
-<p class="view-count">👁️ {b.get('vistas', 0)} personas han visto esto</p>
 </div>
 </div>
 """
             st.markdown(card_html, unsafe_allow_html=True)
-            
-            col_wa, col_fav = st.columns([4, 1])
-            with col_wa:
-                msg = urllib.parse.quote(f"¡Qué onda! Me interesa el boleto para {b['evento']} en MtyPass.")
-                wa_url = f"https://wa.me/{b['whatsapp']}?text={msg}"
-                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 WHATSAPP</a>', unsafe_allow_html=True)
-            with col_fav:
-                if st.button("❤️", key=f"fav_{b['id']}"):
-                    toggle_favorito(b['id'])
+            wa_url = f"https://wa.me/{b['whatsapp']}?text=Me+interesa+el+boleto"
+            st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 CONTACTAR</a>', unsafe_allow_html=True)
 
-    # --- VENDER ---
+    # --- VENDER (CÁLCULOS EN TIEMPO REAL) ---
     with choice[1]:
-        if not st.session_state.user: st.warning("Inicia sesión para publicar.")
+        if not st.session_state.user: st.warning("Inicia sesión para vender.")
         else:
-            with st.form("vender_form", clear_on_submit=True):
+            config = obtener_config()
+            st.subheader("Publica tu Boleto")
+            
+            with st.form("vender_financiero"):
                 ev = st.text_input("Artista / Evento")
-                col1, col2 = st.columns(2)
-                with col1: rec = st.selectbox("Recinto", ["Arena Monterrey", "Estadio BBVA", "Estadio Universitario", "Citibanamex"])
-                with col2: ct = st.selectbox("Categoría", ["Conciertos", "Deportes", "Teatro"])
-                pr = st.number_input("Precio ($MXN)", min_value=100)
-                zn = st.text_input("Sección / Zona")
+                rec = st.selectbox("Lugar", ["Arena Monterrey", "Estadio BBVA", "Estadio Universitario", "Auditorio Citibanamex"])
+                
+                # Cálculo Dinámico
+                precio_deseado = st.number_input("¿Cuánto quieres recibir? ($MXN)", min_value=100, step=100)
+                
+                comision_monto = precio_deseado * (config['comision_vendedor'] / 100)
+                precio_publicado = precio_deseado + (precio_deseado * (config['comision_comprador'] / 100))
+                
+                st.markdown(f"""
+                <div style="background-color:#1E1E1E; padding:15px; border-radius:10px; margin:10px 0;">
+                    <p style='margin:0; color:#888;'>Desglose MtyPass:</p>
+                    <h3 style='margin:0;'>Recibes: ${precio_deseado:,} MXN</h3>
+                    <p style='margin:0; color:#FF4B2B;'>Precio en App: ${precio_publicado:,} MXN</p>
+                    <p style='font-size:0.8rem; color:#888; margin-top:5px;'>
+                    🔒 Tu pago se liberará 48 horas después de que el evento finalice, una vez validado el acceso del comprador.
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                zn = st.text_input("Zona / Sección")
                 wh = st.text_input("WhatsApp (52...)")
-                ft = st.file_uploader("Foto", type=['jpg', 'png', 'jpeg'])
-                if st.form_submit_button("PUBLICAR"):
-                    if ev and wh:
+                ft = st.file_uploader("Foto del boleto", type=['jpg', 'png', 'jpeg'])
+                cat = st.selectbox("Categoría", ["Conciertos", "Deportes", "Teatro"])
+
+                st.divider()
+                with st.expander("Términos y Condiciones (Escrow MtyPass)"):
+                    st.write("""
+                    MtyPass retiene el pago del comprador para garantizar la validez del boleto. 
+                    El vendedor acepta que el dinero será depositado 48 horas después del evento. 
+                    Cualquier reporte de boleto falso resultará en la cancelación del pago y baneo permanente.
+                    """)
+                
+                acepto = st.checkbox("Acepto los Términos y esquema de pagos diferidos.")
+                
+                if st.form_submit_button("PUBLICAR BOLETO"):
+                    if ev and wh and acepto:
                         try:
-                            file_name = f"{uuid.uuid4()}.jpg"
-                            supabase.storage.from_('boletos_imagenes').upload(file_name, ft.getvalue())
-                            url = supabase.storage.from_('boletos_imagenes').get_public_url(file_name)
-                            supabase.table("boletos").insert({"evento": ev, "recinto": rec, "precio": pr, "zona": zn, "whatsapp": wh, "imagen_url": str(url), "categoria": ct, "vendedor_email": st.session_state.user.email}).execute()
-                            st.success("¡Publicado!")
+                            # Subir imagen
+                            fname = f"{uuid.uuid4()}.jpg"
+                            supabase.storage.from_('boletos_imagenes').upload(fname, ft.getvalue())
+                            url = supabase.storage.from_('boletos_imagenes').get_public_url(fname)
+                            # Guardar con datos financieros
+                            guardar_boleto_financiero(ev, rec, precio_deseado, precio_publicado, comision_monto, zn, wh, url, cat)
+                            st.success("¡Publicado! Se verá con el precio ajustado por comisión.")
                             st.rerun()
-                        except: st.error("Error al subir")
+                        except: st.error("Error al publicar")
+                    elif not acepto: st.error("Debes aceptar los términos, compadre.")
 
     # --- MI PERFIL ---
     with choice[2]:
         if st.session_state.user:
-            st.subheader("Favoritos ❤️")
-            # Traer los boletos guardados haciendo un join manual
-            favs_data = supabase.table("favoritos").select("boleto_id").eq("user_email", st.session_state.user.email).execute().data
-            if favs_data:
-                for f in favs_data:
-                    b_data = supabase.table("boletos").select("*").eq("id", f['boleto_id']).execute().data
-                    if b_data:
-                        b = b_data[0]
-                        c1, c2 = st.columns([3, 1])
-                        c1.write(f"⭐ **{b['evento']}** - {b['recinto']} (${b['precio']})")
-                        if c2.button("Quitar", key=f"del_fav_{b['id']}"):
-                            toggle_favorito(b['id'])
-            else: st.write("No tienes boletos guardados.")
+            st.subheader("Mis Ventas")
+            res = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute()
+            for b in res.data:
+                st.info(f"{b['evento']} | Publicado: ${b['precio_publicado']} | Status Pago: {b['status_pago']}")
+        else: st.write("Inicia sesión.")
+
+    # --- PANEL ADMIN (SOLO HOMERO) ---
+    if st.session_state.user and st.session_state.user.email == "homero.garza.g@gmail.com":
+        with choice[-1]:
+            st.subheader("Panel de Control MtyPass")
+            config = obtener_config()
             
-            st.divider()
-            st.subheader("Mis Publicaciones 📌")
-            mis = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute().data
-            for b in mis:
-                with st.expander(f"{b['evento']} ({b.get('vistas', 0)} vistas)"):
-                    if b['estado'] == 'disponible':
-                        if st.button("Vendido", key=f"s_{b['id']}"):
-                            supabase.table("boletos").update({"estado": "vendido"}).eq("id", b['id']).execute()
-                            st.rerun()
-                    if st.button("Borrar", key=f"d_{b['id']}"):
-                        supabase.table("boletos").delete().eq("id", b['id']).execute()
-                        st.rerun()
-        else: st.write("Inicia sesión para ver tu actividad.")
+            with st.form("config_admin"):
+                cv = st.slider("% Comisión Vendedor", 0, 30, int(config['comision_vendedor']))
+                cc = st.slider("% Comisión Comprador", 0, 30, int(config['comision_comprador']))
+                
+                if st.form_submit_button("Guardar Configuración"):
+                    supabase.table("configuracion_plataforma").update({
+                        "comision_vendedor": cv,
+                        "comision_comprador": cc
+                    }).eq("id", 1).execute()
+                    st.success("¡Configuración actualizada!")
+                    st.rerun()
+            
+            st.markdown("---")
+            st.write("Ventas Totales en la Plataforma")
+            # Aquí podrías agregar un resumen de todas las ventas de la DB
 
 if __name__ == "__main__":
     main()
