@@ -52,33 +52,22 @@ def local_css():
 
 local_css()
 
-# --- CONEXIÓN SUPABASE CON MANEJO DE ERRORES ---
+# --- CONEXIÓN SUPABASE (SIMPLIFICADA Y ROBUSTA) ---
 @st.cache_resource
 def init_connection():
     try:
-        # Verificamos si los secrets existen antes de usarlos
-        if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
-            st.error("⚠️ Faltan las credenciales de Supabase en los Secrets de Streamlit.")
-            return None
-        
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        
-        # Si la URL no empieza con http, tronará
-        if not url.startswith("http"):
-            st.error("⚠️ La SUPABASE_URL en los Secrets es inválida (debe empezar con https://).")
-            return None
-            
+        # Limpiamos posibles espacios o comillas extras de los secrets
+        url = st.secrets["SUPABASE_URL"].strip().strip('"').strip("'")
+        key = st.secrets["SUPABASE_KEY"].strip().strip('"').strip("'")
         return create_client(url, key)
     except Exception as e:
-        st.error(f"❌ Error crítico al conectar con Supabase: {e}")
+        st.error(f"Error al conectar con Supabase: {e}")
         return None
 
 supabase = init_connection()
 
 # --- FUNCIONES DE BASE DE DATOS ---
 def obtener_config():
-    if not supabase: return {"comision_vendedor": 5, "comision_comprador": 10}
     try:
         res = supabase.table("configuracion_plataforma").select("*").eq("id", 1).execute()
         return res.data[0] if res.data else {"comision_vendedor": 5, "comision_comprador": 10}
@@ -89,7 +78,7 @@ def guardar_boleto_financiero(ev, rec, precio_v, precio_p, comision, zn, wh, img
     data = {
         "evento": ev, "recinto": rec, "precio": precio_p,
         "precio_vendedor": precio_v, "precio_publicado": precio_p,
-        "comision_aplicada": comision, "zona": zn, "whatsapp": wh,
+        "comision_applied": comision, "zona": zn, "whatsapp": wh,
         "imagen_url": str(img), "categoria": cat,
         "vendedor_email": st.session_state.user.email, "status_pago": "Pendiente"
     }
@@ -98,7 +87,7 @@ def guardar_boleto_financiero(ev, rec, precio_v, precio_p, comision, zn, wh, img
 # --- INTERFAZ ---
 def main():
     if not supabase:
-        st.warning("La aplicación no puede funcionar sin conexión a la base de datos. Revisa tus Secrets.")
+        st.error("No se pudo establecer la conexión. Revisa que SUPABASE_URL y SUPABASE_KEY estén bien escritos en Streamlit.")
         return
 
     if 'user' not in st.session_state: st.session_state.user = None
@@ -160,8 +149,8 @@ def main():
                 st.markdown(card_html, unsafe_allow_html=True)
                 wa_url = f"https://wa.me/{b['whatsapp']}?text=Me+interesa+el+boleto+para+{b['evento']}"
                 st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-link">📱 CONTACTAR POR WHATSAPP</a>', unsafe_allow_html=True)
-        except Exception as e:
-            st.error("Error al cargar eventos. ¿Ya creaste la tabla en Supabase?")
+        except:
+            st.error("Error al cargar eventos.")
 
     # --- VENDER ---
     with choice[1]:
@@ -209,7 +198,7 @@ def main():
                             except Exception as e:
                                 st.error(f"Error al subir: {e}")
                     else:
-                        st.warning("Llena todos los campos y acepta los términos, compadre.")
+                        st.warning("Llena todos los campos y acepta los términos.")
 
     # --- MI PERFIL ---
     with choice[2]:
@@ -218,12 +207,12 @@ def main():
             res = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute()
             for b in res.data:
                 st.info(f"{b['evento']} | Publicado: ${b['precio_publicado']} | Pago: {b['status_pago']}")
-        else: st.write("Inicia sesión para ver tu actividad.")
+        else: st.write("Inicia sesión.")
 
     # --- PANEL ADMIN ---
     if st.session_state.user and st.session_state.user.email == "homero.garza.g@gmail.com":
         with choice[-1]:
-            st.subheader("Configuración de Comisiones")
+            st.subheader("Configuración Admin")
             config = obtener_config()
             with st.form("config_admin"):
                 cv = st.slider("% Comisión Vendedor", 0, 30, int(config['comision_vendedor']))
