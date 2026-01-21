@@ -2,7 +2,7 @@ import streamlit as st
 from supabase import create_client, Client
 import urllib.parse
 
-# Configuración inicial de la página (Layout móvil por defecto)
+# Configuración inicial de la página
 st.set_page_config(
     page_title="MtyPass | Marketplace",
     page_icon="🎟️",
@@ -76,7 +76,7 @@ def login_user(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         st.session_state.user = res.user
-        st.success("¡Bienvenido de vuelta, compadre!")
+        st.success("¡Ya entraste, compadre!")
         st.rerun()
     except Exception as e:
         st.error(f"Error al entrar: {e}")
@@ -84,16 +84,19 @@ def login_user(email, password):
 def register_user(email, password):
     try:
         res = supabase.auth.sign_up({"email": email, "password": password})
-        st.info("¡Registro enviado! Si desactivaste 'Confirm Email' en Supabase, ya puedes iniciar sesión.")
+        st.info("¡Registro enviado! Como ya quitamos el switch, intenta loguearte ahora mismo.")
     except Exception as e:
         st.error(f"Error al registrar: {e}")
 
 # --- FUNCIONES DE DB ---
 def obtener_boletos(filtro_recinto="Todos"):
-    query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True)
-    if filtro_recinto != "Todos":
-        query = query.eq("recinto", filtro_recinto)
-    return query.execute().data
+    try:
+        query = supabase.table("boletos").select("*").eq("estado", "disponible").order("created_at", desc=True)
+        if filtro_recinto != "Todos":
+            query = query.eq("recinto", filtro_recinto)
+        return query.execute().data
+    except:
+        return []
 
 def guardar_boleto(evento, recinto, precio, zona, whatsapp):
     data = {
@@ -110,7 +113,6 @@ def guardar_boleto(evento, recinto, precio, zona, whatsapp):
 # --- INTERFAZ PRINCIPAL ---
 def main():
     st.markdown("<h1 style='text-align: center; margin-bottom: 0;'>🎟️ MtyPass</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #888;'>Mercado secundario de la Sultana del Norte</p>", unsafe_allow_html=True)
 
     # Sidebar: Gestión de Usuario
     with st.sidebar:
@@ -160,7 +162,7 @@ def main():
                     wa_link = f"https://wa.me/{boleto['whatsapp']}?text={msg}"
                     
                     st.markdown(f'<a href="{wa_link}" target="_blank" class="whatsapp-btn">📱 Contactar por WhatsApp</a>', unsafe_allow_html=True)
-                    st.write("") # Espaciador
+                    st.write("") 
 
     # --- PESTAÑA: VENDER ---
     with choice[1]:
@@ -169,40 +171,35 @@ def main():
         else:
             st.subheader("Publica tu boleto")
             with st.form("vender_form", clear_on_submit=True):
-                evento = st.text_input("Artista / Evento", placeholder="Ej: Luis Miguel")
+                evento = st.text_input("Artista / Evento")
                 recinto_vta = st.selectbox("Recinto", ["Arena Monterrey", "Auditorio Citibanamex", "Estadio BBVA", "Estadio Universitario", "Foro Tims"])
                 precio = st.number_input("Precio ($MXN)", min_value=100, step=100)
-                zona = st.text_input("Zona / Sección", placeholder="Ej: VIP, Cancha A")
-                whatsapp = st.text_input("Tu WhatsApp (Ej: 528188889999)", help="Incluye el 52 (código de país)")
+                zona = st.text_input("Zona / Sección")
+                whatsapp = st.text_input("Tu WhatsApp (Ej: 528188889999)")
                 
                 if st.form_submit_button("Publicar Boleto"):
                     if evento and zona and whatsapp:
-                        try:
-                            guardar_boleto(evento, recinto_vta, precio, zona, whatsapp)
-                            st.balloons()
-                            st.success("¡Ya quedó! Tu boleto está en línea.")
-                        except Exception as e:
-                            st.error(f"Error al guardar: {e}")
+                        guardar_boleto(evento, recinto_vta, precio, zona, whatsapp)
+                        st.balloons()
+                        st.success("¡Listo! Tu boleto ya aparece en Explorar.")
                     else:
-                        st.warning("No te bañes, llena todos los campos.")
+                        st.warning("Faltan campos por llenar.")
 
     # --- PESTAÑA: MIS VENTAS ---
     with choice[2]:
-        if not st.session_state.user:
-            st.info("Inicia sesión para gestionar tus publicaciones.")
-        else:
+        if st.session_state.user:
             st.subheader("Tus publicaciones")
             mis_boletos = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute().data
             if mis_boletos:
                 for b in mis_boletos:
-                    with st.expander(f"📌 {b['evento']} - ${b['precio']} ({b['estado']})"):
-                        st.write(f"Recinto: {b['recinto']}")
-                        st.write(f"Zona: {b['zona']}")
+                    with st.expander(f"📌 {b['evento']} - ${b['precio']}"):
                         if st.button("Marcar como Vendido", key=f"del_{b['id']}"):
                             supabase.table("boletos").update({"estado": "vendido"}).eq("id", b['id']).execute()
                             st.rerun()
             else:
-                st.write("Aún no tienes ventas publicadas.")
+                st.write("Aún no tienes ventas.")
+        else:
+            st.info("Inicia sesión para ver tus boletos.")
 
 if __name__ == "__main__":
     main()
