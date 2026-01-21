@@ -11,15 +11,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS: MÁXIMA VISIBILIDAD Y DISEÑO REGIO ---
+# --- CSS: ESTABILIDAD Y VISIBILIDAD ---
 def local_css():
     st.markdown("""
 <style>
     .stApp { background-color: #000000; color: #FFFFFF; }
     section[data-testid="stSidebar"] { background-color: #121212 !important; }
     section[data-testid="stSidebar"] * { color: #FFFFFF !important; }
-    
-    /* Botón Sidebar Resaltado */
     button[kind="header"] { background-color: #1E1E1E !important; color: #FF4B2B !important; }
 
     /* Inputs y Selectores */
@@ -31,13 +29,13 @@ def local_css():
         border-radius: 12px !important;
     }
 
-    /* Botón Principal Rojo */
+    /* Botones */
     div.stButton > button:first-child {
         background-color: #FF4B2B; color: white !important;
         border-radius: 12px; border: none; height: 3.5rem; width: 100%; font-weight: bold;
     }
 
-    /* Tarjeta de Evento */
+    /* Tarjeta */
     .card-container {
         background-color: #111111; border-radius: 15px;
         border: 1px solid #333; margin-bottom: 5px; overflow: hidden;
@@ -45,6 +43,7 @@ def local_css():
     .card-body { padding: 15px; }
     .price-tag { color: #FF4B2B; font-size: 1.5rem; font-weight: bold; }
     .ticket-img { width: 100%; height: 250px; object-fit: cover; }
+    .view-count { color: #888; font-size: 0.8rem; margin-top: 5px; }
 
     /* Botón WhatsApp */
     .wa-link {
@@ -69,25 +68,32 @@ def init_connection():
 
 supabase = init_connection()
 
-# --- MANEJO DE SESIÓN Y FAVORITOS ---
+# --- MANEJO DE SESIÓN Y LÓGICA ---
 if 'user' not in st.session_state:
     st.session_state.user = None
+if 'vistos' not in st.session_state:
+    st.session_state.vistos = set()
+
+def registrar_vista(boleto_id, vistas_actuales):
+    # Solo contar una vista por sesión para no inflar el número
+    if boleto_id not in st.session_state.vistos:
+        nuevas_vistas = (vistas_actuales or 0) + 1
+        supabase.table("boletos").update({"vistas": nuevas_vistas}).eq("id", boleto_id).execute()
+        st.session_state.vistos.add(boleto_id)
 
 def toggle_favorito(boleto_id):
     if not st.session_state.user:
-        st.error("Inicia sesión para guardar favoritos")
+        st.error("Inicia sesión primero")
         return
-    
     email = st.session_state.user.email
-    # Check si ya existe
     existente = supabase.table("favoritos").select("*").eq("user_email", email).eq("boleto_id", boleto_id).execute().data
-    
     if existente:
         supabase.table("favoritos").delete().eq("user_email", email).eq("boleto_id", boleto_id).execute()
-        st.toast("Boleto eliminado de guardados")
+        st.toast("Eliminado de favoritos")
     else:
         supabase.table("favoritos").insert({"user_email": email, "boleto_id": boleto_id}).execute()
-        st.toast("❤️ Boleto guardado")
+        st.toast("❤️ Guardado en favoritos")
+    st.rerun()
 
 # --- INTERFAZ ---
 def main():
@@ -132,6 +138,9 @@ def main():
         boletos = query.execute().data
 
         for b in boletos:
+            # Registrar vista automáticamente
+            registrar_vista(b['id'], b.get('vistas', 0))
+            
             img = b.get("imagen_url")
             img_tag = f'<img src="{img}" class="ticket-img">' if img and img != 'None' else ""
             card_html = f"""
@@ -142,6 +151,7 @@ def main():
 <h3 style='margin:0; color:white;'>{b['evento']}</h3>
 <p style='color:#DDD; margin-bottom:0;'>Zona: {b['zona']}</p>
 <p class="price-tag">${b['precio']:,} MXN</p>
+<p class="view-count">👁️ {b.get('vistas', 0)} personas han visto esto</p>
 </div>
 </div>
 """
@@ -176,26 +186,32 @@ def main():
                             supabase.storage.from_('boletos_imagenes').upload(file_name, ft.getvalue())
                             url = supabase.storage.from_('boletos_imagenes').get_public_url(file_name)
                             supabase.table("boletos").insert({"evento": ev, "recinto": rec, "precio": pr, "zona": zn, "whatsapp": wh, "imagen_url": str(url), "categoria": ct, "vendedor_email": st.session_state.user.email}).execute()
-                            st.success("¡Listo!")
+                            st.success("¡Publicado!")
                             st.rerun()
                         except: st.error("Error al subir")
 
-    # --- MI PERFIL / MIS VENTAS ---
+    # --- MI PERFIL ---
     with choice[2]:
         if st.session_state.user:
-            st.subheader("Boletos Guardados ❤️")
-            favs = supabase.table("favoritos").select("boleto_id").eq("user_email", st.session_state.user.email).execute().data
-            if favs:
-                for f in favs:
-                    b = supabase.table("boletos").select("*").eq("id", f['boleto_id']).execute().data[0]
-                    st.write(f"⭐ {b['evento']} - {b['recinto']} (${b['precio']})")
+            st.subheader("Favoritos ❤️")
+            # Traer los boletos guardados haciendo un join manual
+            favs_data = supabase.table("favoritos").select("boleto_id").eq("user_email", st.session_state.user.email).execute().data
+            if favs_data:
+                for f in favs_data:
+                    b_data = supabase.table("boletos").select("*").eq("id", f['boleto_id']).execute().data
+                    if b_data:
+                        b = b_data[0]
+                        c1, c2 = st.columns([3, 1])
+                        c1.write(f"⭐ **{b['evento']}** - {b['recinto']} (${b['precio']})")
+                        if c2.button("Quitar", key=f"del_fav_{b['id']}"):
+                            toggle_favorito(b['id'])
             else: st.write("No tienes boletos guardados.")
             
             st.divider()
             st.subheader("Mis Publicaciones 📌")
             mis = supabase.table("boletos").select("*").eq("vendedor_email", st.session_state.user.email).execute().data
             for b in mis:
-                with st.expander(f"{b['evento']} - {b['estado']}"):
+                with st.expander(f"{b['evento']} ({b.get('vistas', 0)} vistas)"):
                     if b['estado'] == 'disponible':
                         if st.button("Vendido", key=f"s_{b['id']}"):
                             supabase.table("boletos").update({"estado": "vendido"}).eq("id", b['id']).execute()
